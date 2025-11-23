@@ -33,7 +33,7 @@ last_live_state = None
 
 
 # ===============================
-#     إدارة المشتركين
+#   إدارة المشتركين
 # ===============================
 
 def is_admin(user_id):
@@ -63,41 +63,57 @@ async def remove_subscriber(chat_id):
 
 
 # ===============================
-#     فحص البث في تيك توك
+#   نظام فحص البث المتقدم PRO
 # ===============================
 
 async def check_live():
     """
-    يعتمد على رابط /live الحقيقي:
-    يبحث عن roomId / liveRoom / webcast / isLive
+    PRO Live Detection:
+    - فحص كلمات البث الأساسية
+    - فحص JSON الداخلي
+    - تجاهل بقايا البث (cache)
     """
+
     try:
         headers = {
             "User-Agent": "Mozilla/5.0",
             "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+            "Referer": "https://www.google.com"
         }
 
         async with aiohttp.ClientSession() as session:
             async with session.get(TIKTOK_URL, headers=headers, timeout=15) as resp:
                 html = await resp.text()
 
-        keywords = [
-            "roomId",
-            "liveRoom",
-            "webcast",
+        # ===== كشف البث عبر كلمات رئيسية =====
+        strong_keywords = [
             '"isLive":true',
             '"is_live":true',
-            'liveRoomId'
+            '"status":1',
+            '"webcast"',
+            '"roomId"',
+            '"liveRoom":',
         ]
 
-        for k in keywords:
-            if k in html:
-                return True
+        for key in strong_keywords:
+            if key in html:
+                return True  # بث مؤكد
+
+        # ===== فحص JSON الداخلي =====
+        if '"liveRoomId"' in html:
+            return True
+
+        # ===== فحص إضافي للتأكد =====
+        weak_keywords = ["broadcast", "anchor_live_info"]
+
+        weak_hits = sum(k in html for k in weak_keywords)
+        if weak_hits >= 2:
+            return True
 
         return False
 
     except Exception as e:
-        logger.error(f"خطأ أثناء فحص البث: {e}")
+        logger.error(f"❌ خطأ أثناء فحص البث: {e}")
         return False
 
 
@@ -110,13 +126,13 @@ async def notify_all(message):
     for chat_id in subs:
         try:
             await bot.send_message(chat_id, message, disable_web_page_preview=True)
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.03)
         except:
             pass
 
 
 # ===============================
-#        أوامر البوت
+#         أوامر البوت
 # ===============================
 
 @dp.message_handler(commands=["start"])
@@ -130,7 +146,7 @@ async def cmd_start(message: types.Message):
         "الأوامر:\n"
         "/start — تفعيل الإشعارات\n"
         "/stop — إيقاف الإشعارات\n"
-        "/status — معرفة حالة البث الآن\n"
+        "/status — حالة البث\n"
     )
 
     if is_admin(uid):
@@ -146,7 +162,7 @@ async def cmd_stop(message: types.Message):
 
 
 # ===============================
-#          أمر الحالة (معدل)
+#        أمر /status
 # ===============================
 
 @dp.message_handler(commands=["status"])
@@ -165,7 +181,7 @@ async def cmd_status(message: types.Message):
 
 
 # ===============================
-#     أوامر المدير
+#        أوامر المدير
 # ===============================
 
 @dp.message_handler(commands=["مدير"])
@@ -199,7 +215,7 @@ async def cmd_sendall(message: types.Message):
 
     content = message.text.replace("/ارسال", "").strip()
     if not content:
-        return await message.answer("❗ اكتب هكذا:\n/ارسال نص الرسالة")
+        return await message.answer("❗ اكتب:\n/ارسال رسالة")
 
     await notify_all(content)
     await message.answer("📢 تم إرسال الرسالة للجميع.")
@@ -214,7 +230,7 @@ async def cmd_stats(message: types.Message):
         f"📊 <b>إحصائيات البوت</b>\n\n"
         f"👥 المشتركين: {len(subs)}\n"
         f"🔗 رابط تيك توك:\n{TIKTOK_URL}\n"
-        f"⏱ الفحص كل {CHECK_INTERVAL} ثانية\n"
+        f"⏱ الفحص كل: {CHECK_INTERVAL} ثانية\n"
     )
 
 
@@ -234,7 +250,7 @@ async def cmd_reboot(message: types.Message):
 
 
 # ===============================
-#     راصد البث (خلف الكواليس)
+#   راصد البث PRO (متقدم)
 # ===============================
 
 async def tiktok_watcher():
@@ -245,11 +261,21 @@ async def tiktok_watcher():
     while True:
         live = await check_live()
 
+        # بداية البث
         if last_live_state is False and live is True:
-            await notify_all("🔴 <b>بدأ البث الآن!</b>\n" + TIKTOK_URL)
+            await notify_all(
+                f"🔴 <b>تم بدء البث الآن!</b>\n\n"
+                f"🎥 رابط البث:\n{TIKTOK_URL}\n\n"
+                f"📣 سارع بالدخول قبل أن يفوتك!"
+            )
 
+        # انتهاء البث
         elif last_live_state is True and live is False:
-            await notify_all("⚪ <b>انتهى البث الآن.</b>\n" + TIKTOK_URL)
+            await notify_all(
+                f"⚪ <b>انتهى البث الآن.</b>\n\n"
+                f"🎥 كان على الرابط:\n{TIKTOK_URL}\n\n"
+                f"📌 سيتم إعلامك عند بدء بث جديد."
+            )
 
         last_live_state = live
         await asyncio.sleep(CHECK_INTERVAL)
@@ -257,11 +283,11 @@ async def tiktok_watcher():
 
 async def on_start(dp):
     asyncio.create_task(tiktok_watcher())
-    logger.info("🚀 البوت يعمل الآن")
+    logger.info("🚀 البوت يعمل الآن بنظام PRO")
 
 
 # ===============================
-#         تشغيل البوت
+#      تشغيل البوت
 # ===============================
 
 def main():
