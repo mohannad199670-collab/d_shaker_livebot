@@ -8,7 +8,7 @@ import aiohttp
 from aiogram import Bot, Dispatcher, executor, types
 
 # ===============================
-#          الإعــداد
+#          الإعدادات
 # ===============================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -28,7 +28,7 @@ bot = Bot(token=TELEGRAM_TOKEN, parse_mode="HTML")
 dp = Dispatcher(bot)
 
 SUBS_FILE = Path("subscribers.json")
-CHECK_INTERVAL = 30  # كل 30 ثانية فحص البث
+CHECK_INTERVAL = 30  # فحص كل 30 ثانية
 last_live_state = None
 
 
@@ -63,19 +63,14 @@ async def remove_subscriber(chat_id):
 
 
 # ===============================
-#     فحص بث تيك توك الحقيقي
+#     فحص البث في تيك توك
 # ===============================
 
 async def check_live():
     """
-    يعتمد على رابط بث مباشر (LIVE ROOM)
-    ويبحث عن كلمات قوية تدل على وجود البث:
-    - roomId
-    - liveRoom
-    - webcast
-    - isLive
+    يعتمد على رابط /live الحقيقي:
+    يبحث عن roomId / liveRoom / webcast / isLive
     """
-
     try:
         headers = {
             "User-Agent": "Mozilla/5.0",
@@ -102,12 +97,12 @@ async def check_live():
         return False
 
     except Exception as e:
-        logger.error(f"فشل فحص البث: {e}")
+        logger.error(f"خطأ أثناء فحص البث: {e}")
         return False
 
 
 # ===============================
-#     إرسال الإشعارات
+#        إرسال الإشعارات
 # ===============================
 
 async def notify_all(message):
@@ -135,7 +130,7 @@ async def cmd_start(message: types.Message):
         "الأوامر:\n"
         "/start — تفعيل الإشعارات\n"
         "/stop — إيقاف الإشعارات\n"
-        "/status — حالة البث الآن\n"
+        "/status — معرفة حالة البث الآن\n"
     )
 
     if is_admin(uid):
@@ -150,17 +145,27 @@ async def cmd_stop(message: types.Message):
     await message.answer("❌ تم إيقاف الإشعارات.")
 
 
+# ===============================
+#          أمر الحالة (معدل)
+# ===============================
+
 @dp.message_handler(commands=["status"])
 async def cmd_status(message: types.Message):
     live = await check_live()
     if live:
-        await message.answer("🔴 <b>البث شغّال الآن!</b>")
+        await message.answer(
+            f"🔴 <b>البث شغّال الآن!</b>\n\n"
+            f"🎥 رابط البث:\n{TIKTOK_URL}"
+        )
     else:
-        await message.answer("⚪ <b>لا يوجد بث مباشر حاليًا.</b>")
+        await message.answer(
+            f"⚪ <b>لا يوجد بث مباشر حاليًا.</b>\n\n"
+            f"📌 رابط الحساب:\n{TIKTOK_URL}"
+        )
 
 
 # ===============================
-#     أوامر المدير بالعربي
+#     أوامر المدير
 # ===============================
 
 @dp.message_handler(commands=["مدير"])
@@ -208,8 +213,8 @@ async def cmd_stats(message: types.Message):
     await message.answer(
         f"📊 <b>إحصائيات البوت</b>\n\n"
         f"👥 المشتركين: {len(subs)}\n"
-        f"🔗 رابط تيك توك المستخدم:\n{TIKTOK_URL}\n"
-        f"⏱ فحص كل: {CHECK_INTERVAL} ثانية"
+        f"🔗 رابط تيك توك:\n{TIKTOK_URL}\n"
+        f"⏱ الفحص كل {CHECK_INTERVAL} ثانية\n"
     )
 
 
@@ -217,7 +222,7 @@ async def cmd_stats(message: types.Message):
 async def cmd_test(message: types.Message):
     if not is_admin(message.from_user.id):
         return
-    await message.answer("🔔 تنبيه تجريبي! (ستصلك رسالة إشعار)")
+    await message.answer("🔔 تنبيه تجريبي!")
 
 
 @dp.message_handler(commands=["اعادة"])
@@ -229,7 +234,7 @@ async def cmd_reboot(message: types.Message):
 
 
 # ===============================
-#      راصد البث (خلفية)
+#     راصد البث (خلف الكواليس)
 # ===============================
 
 async def tiktok_watcher():
@@ -241,9 +246,10 @@ async def tiktok_watcher():
         live = await check_live()
 
         if last_live_state is False and live is True:
-            await notify_all("🔴 <b>بدأ البث الآن!</b>")
+            await notify_all("🔴 <b>بدأ البث الآن!</b>\n" + TIKTOK_URL)
+
         elif last_live_state is True and live is False:
-            await notify_all("⚪ <b>انتهى البث الآن.</b>")
+            await notify_all("⚪ <b>انتهى البث الآن.</b>\n" + TIKTOK_URL)
 
         last_live_state = live
         await asyncio.sleep(CHECK_INTERVAL)
@@ -251,8 +257,12 @@ async def tiktok_watcher():
 
 async def on_start(dp):
     asyncio.create_task(tiktok_watcher())
-    logger.info("🚀 البوت بدأ العمل")
+    logger.info("🚀 البوت يعمل الآن")
 
+
+# ===============================
+#         تشغيل البوت
+# ===============================
 
 def main():
     executor.start_polling(dp, skip_updates=True, on_startup=on_start)
